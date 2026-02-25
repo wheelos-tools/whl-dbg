@@ -25,7 +25,16 @@ fi
 
 mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR"
 
-# 1. 自动下载
+# 1. 自动下载（已安装则跳过）
+if [ "$ROLE" = "s" ]; then
+    TARGET_BIN="frps"
+else
+    TARGET_BIN="frpc"
+fi
+
+if [ -x "$TARGET_BIN" ]; then
+    echo "检测到已安装 $TARGET_BIN，跳过下载。"
+else
 arch="$(uname -m)"
 case "$arch" in
     x86_64)
@@ -54,18 +63,29 @@ tar -zxf frp.tar.gz
 [ "$ROLE" = "s" ] && cp "frp_${FRP_VER}_${suffix}/frps" . || cp "frp_${FRP_VER}_${suffix}/frpc" .
 chmod +x frps frpc 2>/dev/null || true
 rm -rf "frp.tar.gz" "frp_${FRP_VER}_${suffix}"
+fi
 
 # 2. 默认配置生成
 if [ "$ROLE" = "s" ]; then
+    read -s -p "输入 auth.token: " AUTH_TOKEN
+    echo
+    if [ -z "$AUTH_TOKEN" ]; then
+        echo "错误: auth.token 不能为空"
+        exit 1
+    fi
+
     cat <<EOF > frps.toml
 bindPort = 7000
-auth.token = "SECRET_123"
+auth.token = "$AUTH_TOKEN"
 allowPorts = [ { start = 60000, end = 60100 } ]
 EOF
+    chmod 600 frps.toml
     echo "服务端安装完成。目录: $INSTALL_DIR"
 else
     read -p "输入服务器IP: " S_IP
     read -p "输入此车编号(如1): " C_ID
+    read -s -p "输入 auth.token: " AUTH_TOKEN
+    echo
 
     if [ -z "$S_IP" ]; then
         echo "错误: 服务器IP不能为空"
@@ -77,11 +97,16 @@ else
         exit 1
     fi
 
+    if [ -z "$AUTH_TOKEN" ]; then
+        echo "错误: auth.token 不能为空"
+        exit 1
+    fi
+
     REMOTE_PORT=$((60000 + C_ID))
     cat <<EOF > frpc.toml
 serverAddr = "$S_IP"
 serverPort = 7000
-auth.token = "SECRET_123"
+auth.token = "$AUTH_TOKEN"
 [[proxies]]
 name = "car_${C_ID}_ssh"
 type = "tcp"
@@ -89,5 +114,6 @@ localIP = "127.0.0.1"
 localPort = 22
 remotePort = $REMOTE_PORT
 EOF
+    chmod 600 frpc.toml
     echo "车端安装完成。目录: $INSTALL_DIR，对应端口: $REMOTE_PORT"
 fi

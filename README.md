@@ -39,8 +39,8 @@
 默认配置示例：
 
 - `bindPort = 7000`
-- `allowPorts = 6000~6100`
-- `auth.token = "SECRET_123"`
+- `allowPorts = 60000~60100`
+- `auth.token` 由安装时交互输入
 
 ### 2) 车端安装（每台车）
 
@@ -52,20 +52,27 @@
 
 - 服务器 IP
 - 车编号（数字）
+- `auth.token`
 
 端口映射规则：
 
-- `remotePort = 6000 + 车编号`
+- `remotePort = 60000 + 车编号`
 - 例如车编号 `1`，对应端口 `6001`（映射到该车 `22` 端口）
 
 ## 运行管理
 
-在安装目录中执行：
+可在任意目录执行（默认管理 `/opt/frp`）：
 
 ```bash
-./manage.sh start
-./manage.sh status
-./manage.sh stop
+bash manage.sh start
+bash manage.sh status
+bash manage.sh stop
+```
+
+如安装目录不是 `/opt/frp`，可通过环境变量指定：
+
+```bash
+INSTALL_DIR=/your/path bash manage.sh status
 ```
 
 说明：
@@ -93,6 +100,7 @@ ssh -p 6001 user@1.2.3.4
 2. 服务器安全组/防火墙仅放行必要端口（如 `7000` 和已分配的车端端口）。
 3. 车端应限制 SSH 账号权限，优先使用密钥登录。
 4. 不要把包含真实 token 的配置提交到公开仓库。
+5. 脚本会将 `frps.toml` / `frpc.toml` 权限设置为 `600`。
 
 ## 常见问题
 

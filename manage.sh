@@ -3,23 +3,33 @@
 
 set -u
 
+# 优先使用 INSTALL_DIR（默认 /opt/frp），若该目录不存在则回退到当前目录
+INSTALL_DIR="${INSTALL_DIR:-/opt/frp}"
+if [ -d "$INSTALL_DIR" ]; then
+    WORK_DIR="$INSTALL_DIR"
+else
+    WORK_DIR="$PWD"
+fi
+
 # 自动检测角色
-if [ -f "./frps" ]; then
-    BIN="./frps"
-    CONF="frps.toml"
-    LOG="frps.log"
+if [ -f "$WORK_DIR/frps" ]; then
+    BIN="$WORK_DIR/frps"
+    CONF="$WORK_DIR/frps.toml"
+    LOG="$WORK_DIR/frps.log"
     PROC="frps"
-elif [ -f "./frpc" ]; then
-    BIN="./frpc"
-    CONF="frpc.toml"
-    LOG="frpc.log"
+elif [ -f "$WORK_DIR/frpc" ]; then
+    BIN="$WORK_DIR/frpc"
+    CONF="$WORK_DIR/frpc.toml"
+    LOG="$WORK_DIR/frpc.log"
     PROC="frpc"
 else
-    echo "错误: 当前目录未找到 frps 或 frpc 可执行文件"
+    echo "错误: 在 $WORK_DIR 未找到 frps 或 frpc 可执行文件"
+    echo "提示: 可设置 INSTALL_DIR 指向安装目录，例如: INSTALL_DIR=/opt/frp bash manage.sh status"
     exit 1
 fi
 
-PID_FILE="${PROC}.pid"
+PID_FILE="$WORK_DIR/${PROC}.pid"
+ACTION="${1:-}"
 
 is_running() {
     if [ -f "$PID_FILE" ]; then
@@ -31,7 +41,7 @@ is_running() {
     return 1
 }
 
-case "$1" in
+case "$ACTION" in
     start)
         if [ ! -x "$BIN" ]; then
             echo "错误: 不存在可执行文件 $BIN"
@@ -104,5 +114,6 @@ case "$1" in
         ;;
     *)
         echo "用法: $0 {start|stop|status}"
+        exit 1
         ;;
 esac
