@@ -1,33 +1,19 @@
 #!/bin/bash
-# 用法: ./manage.sh [start|stop|status]
+# 用法: ./car/manage.sh [start|stop|status]
 
 set -u
 
-# 优先使用 INSTALL_DIR（默认 /opt/frp），若该目录不存在则回退到当前目录
-INSTALL_DIR="${INSTALL_DIR:-/opt/frp}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/frp/car}"
 if [ -d "$INSTALL_DIR" ]; then
     WORK_DIR="$INSTALL_DIR"
 else
     WORK_DIR="$PWD"
 fi
 
-# 自动检测角色
-if [ -f "$WORK_DIR/frps" ]; then
-    BIN="$WORK_DIR/frps"
-    CONF="$WORK_DIR/frps.toml"
-    LOG="$WORK_DIR/frps.log"
-    PROC="frps"
-elif [ -f "$WORK_DIR/frpc" ]; then
-    BIN="$WORK_DIR/frpc"
-    CONF="$WORK_DIR/frpc.toml"
-    LOG="$WORK_DIR/frpc.log"
-    PROC="frpc"
-else
-    echo "错误: 在 $WORK_DIR 未找到 frps 或 frpc 可执行文件"
-    echo "提示: 可设置 INSTALL_DIR 指向安装目录，例如: INSTALL_DIR=/opt/frp bash manage.sh status"
-    exit 1
-fi
-
+BIN="$WORK_DIR/frpc"
+CONF="$WORK_DIR/frpc.toml"
+LOG="$WORK_DIR/frpc.log"
+PROC="frpc"
 PID_FILE="$WORK_DIR/${PROC}.pid"
 ACTION="${1:-}"
 

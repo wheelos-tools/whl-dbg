@@ -1,51 +1,59 @@
 # whl-dbg
 
-一个基于 [frp](https://github.com/fatedier/frp) 的远程调试脚本集合，用于通过公网服务器统一接入多个车端（如 SSH）。
+一个基于 [frp](https://github.com/fatedier/frp) 的远程调试脚本集合，采用 **Bastion(SSH 跳板) + FRP** 架构：
 
-- `install.sh`：安装并生成 `frps`/`frpc` 默认配置
-- `manage.sh`：启动、停止、查看状态
+- 公网仅开放服务器 `22` / `7000`
+- 车端映射端口（`60000+`）仅服务器本机可访问
+- 用户必须通过 SSH 跳板访问车端
 
-## 适用场景
+## 1) 服务端配置（Server）
 
-- 一台公网 Linux 服务器部署 `frps`
-- 多台车端 Linux 设备部署 `frpc`
-- 通过服务器的不同端口区分不同车端
-
-## 前置要求
-
-- 操作系统：**Linux**（脚本下载 Linux 版 frp）
-- 需具备：`tar`，以及 `curl` 或 `wget`
-- 建议使用 `root` 或有写入安装目录权限的用户
-
-> 默认安装目录为 `/opt/frp`，可通过环境变量覆盖：
->
-> ```bash
-> INSTALL_DIR=/your/path ./install.sh s
-> ```
-
-## 快速开始
-
-### 1) 服务端安装（公网服务器）
+### 安装
 
 ```bash
-./install.sh s
+bash server/install.sh
 ```
 
-生成文件（默认在 `/opt/frp`）：
+脚本生成（默认 `/opt/frp/server`）：
 
 - `frps`
 - `frps.toml`
 
-默认配置示例：
+默认配置要点：
 
-- `bindPort = 7000`
-- `allowPorts = 60000~60100`
-- `auth.token` 由安装时交互输入
+```toml
+bindPort = 7000
+auth.token = "<交互输入>"
+proxyBindAddr = "127.0.0.1"
+allowPorts = [ { start = 60000, end = 60100 } ]
+```
 
-### 2) 车端安装（每台车）
+说明：`proxyBindAddr = "127.0.0.1"` 会让 `60000+` 端口不对公网暴露。
+
+### 安全组/防火墙
+
+只放行：
+
+- TCP `22`（跳板 SSH）
+- TCP `7000`（frpc -> frps）
+
+不要放行 `60000-60100` 到公网。
+
+### 创建跳板用户（示例）
 
 ```bash
-./install.sh c
+sudo useradd -m -s /bin/bash user_a
+sudo passwd user_a
+```
+
+推荐仅密钥登录，不给 root 直连公网。
+
+## 2) 车端配置（Client/Car）
+
+### 安装
+
+```bash
+bash car/install.sh
 ```
 
 会交互输入：
@@ -54,72 +62,96 @@
 - 车编号（数字）
 - `auth.token`
 
-端口映射规则：
+生成配置示例：
 
-- `remotePort = 60000 + 车编号`
-- 例如车编号 `1`，对应端口 `6001`（映射到该车 `22` 端口）
+```toml
+serverAddr = "<服务器公网IP>"
+serverPort = 7000
+auth.token = "<交互输入>"
 
-## 运行管理
-
-可在任意目录执行（默认管理 `/opt/frp`）：
-
-```bash
-bash manage.sh start
-bash manage.sh status
-bash manage.sh stop
+[[proxies]]
+name = "car_01_ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 60001
+bindAddr = "127.0.0.1"
 ```
 
-如安装目录不是 `/opt/frp`，可通过环境变量指定：
+说明：`bindAddr = "127.0.0.1"` 使该车端映射口只能被服务器本机访问。
+
+### 运行管理
 
 ```bash
-INSTALL_DIR=/your/path bash manage.sh status
+bash server/manage.sh start
+bash server/manage.sh status
+bash server/manage.sh stop
+
+bash car/manage.sh start
+bash car/manage.sh status
+bash car/manage.sh stop
 ```
 
-说明：
+## 下载源策略（主源 + 官方回退）
 
-- 脚本会自动识别当前目录是 `frps` 还是 `frpc`
-- 使用 PID 文件（`frps.pid`/`frpc.pid`）管理进程，避免误杀同名进程
-- 日志文件：`frps.log` / `frpc.log`
+安装脚本默认按以下顺序下载：
 
-## 连接车端示例
+1. 自托管源（主源）
+2. GitHub 官方 release（回退源）
 
-假设：
-
-- 服务器公网 IP：`1.2.3.4`
-- 车编号：`1`（对应端口 `6001`）
-
-则可在运维终端执行：
+可通过环境变量覆盖：
 
 ```bash
-ssh -p 6001 user@1.2.3.4
+FRP_PRIMARY_URL="https://your.mirror/frp_0.54.0_linux_amd64.tar.gz" \
+FRP_FALLBACK_URL="https://github.com/fatedier/frp/releases/download/v0.54.0/frp_0.54.0_linux_amd64.tar.gz" \
+bash server/install.sh
 ```
 
-## 安全建议（强烈建议）
+建议仅覆盖主源，保留官方回退，确保可用性。
 
-1. 把 `auth.token` 改为强随机字符串。
-2. 服务器安全组/防火墙仅放行必要端口（如 `7000` 和已分配的车端端口）。
-3. 车端应限制 SSH 账号权限，优先使用密钥登录。
-4. 不要把包含真实 token 的配置提交到公开仓库。
-5. 脚本会将 `frps.toml` / `frpc.toml` 权限设置为 `600`。
+## 3) 用户端配置（User PC）
 
-## 常见问题
+用户端无需安装 frp，仅配置 SSH。
 
-### Q1: `manage.sh status` 看不到监听端口？
+编辑 `~/.ssh/config`：
 
-- 脚本优先使用 `lsof`，其次 `netstat`
-- 若系统缺少相关命令，仅影响展示，不影响进程本身运行
+```text
+Host bastion
+	HostName 服务器公网IP
+	User user_a
+	Port 22
 
-### Q2: 端口冲突怎么办？
+Host car1
+	HostName 127.0.0.1
+	Port 60001
+	User root
+	ProxyJump bastion
+```
 
-- 调整车编号，或修改 `frps.toml` 的 `allowPorts`
-- 确保同一服务器上每台车使用唯一 `remotePort`
+连接：
 
-### Q3: 在 macOS 上直接运行 `install.sh` 报错？
+```bash
+ssh car1
+```
 
-- 这是预期行为：脚本下载 Linux 二进制，请在目标 Linux 主机执行
+## 4) 访问链路（诊断流程）
+
+1. 用户执行 `ssh car1`
+2. 本机先连 `bastion:22`
+3. 再通过跳板访问服务器侧 `127.0.0.1:60001`
+4. frps 将请求经 `7000` 隧道转发到车端 `22`
+5. 获得车端 Shell
+
+## 安全收益
+
+- 隐身性：公网扫描看不到车端 `60000+` 端口
+- 可控性：禁用服务器用户即可回收访问权限
+- 分层防护：SSH 跳板 + FRP token
 
 ## 文件说明
 
-- `install.sh`：安装 frp 并生成配置
-- `manage.sh`：进程管理与状态查看
+- `server/install.sh`：服务端安装与配置生成
+- `server/manage.sh`：服务端进程管理与状态查看
+- `car/install.sh`：车端安装与配置生成
+- `car/manage.sh`：车端进程管理与状态查看
 - `LICENSE`：许可证
