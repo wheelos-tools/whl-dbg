@@ -1,5 +1,5 @@
 #!/bin/bash
-# 用法: ./car/manage.sh [start|stop|status]
+# Usage: manage.sh [start|stop|status]
 
 set -u
 
@@ -21,7 +21,16 @@ is_running() {
     if [ -f "$PID_FILE" ]; then
         pid="$(cat "$PID_FILE")"
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            return 0
+            # ensure the process is frpc (not PID reuse)
+            if command -v ps >/dev/null 2>&1; then
+                cmd="$(ps -p "$pid" -o comm= 2>/dev/null)"
+                if [ "$cmd" = "frpc" ]; then
+                    return 0
+                fi
+            else
+                # fallback: assume running if kill -0 succeeded
+                return 0
+            fi
         fi
     fi
     return 1
@@ -30,15 +39,15 @@ is_running() {
 case "$ACTION" in
     start)
         if [ ! -x "$BIN" ]; then
-            echo "错误: 不存在可执行文件 $BIN"
+            echo "Error: executable not found: $BIN"
             exit 1
         fi
         if [ ! -f "$CONF" ]; then
-            echo "错误: 不存在配置文件 $CONF"
+            echo "Error: configuration file not found: $CONF"
             exit 1
         fi
         if is_running; then
-            echo "$PROC 已经在运行 (PID: $(cat "$PID_FILE"))"
+            echo "$PROC is already running (PID: $(cat "$PID_FILE"))"
             exit 0
         fi
 
@@ -46,9 +55,9 @@ case "$ACTION" in
         echo $! > "$PID_FILE"
         sleep 1
         if is_running; then
-            echo "$PROC 已在后台启动 (PID: $(cat "$PID_FILE"))，日志查看 $LOG"
+            echo "$PROC started in background (PID: $(cat "$PID_FILE")), view logs at $LOG"
         else
-            echo "启动失败，请检查日志: $LOG"
+            echo "Start failed, please check logs: $LOG"
             rm -f "$PID_FILE"
             exit 1
         fi
@@ -60,46 +69,52 @@ case "$ACTION" in
             sleep 1
             if kill -0 "$pid" 2>/dev/null; then
                 kill -9 "$pid" 2>/dev/null || true
+                sleep 1
+            fi
+            if kill -0 "$pid" 2>/dev/null; then
+                # still alive after SIGKILL
+                echo "Failed to stop $PROC (pid $pid still running)" >&2
+                exit 1
             fi
             rm -f "$PID_FILE"
-            echo "$PROC 已停止"
+            echo "$PROC stopped"
         else
-            echo "$PROC 未运行"
+            echo "$PROC is not running"
             rm -f "$PID_FILE"
         fi
         ;;
     status)
-        echo "--- 进程诊断 ---"
+        echo "--- Process Info ---"
         if is_running; then
             pid="$(cat "$PID_FILE")"
-            echo "状态: [运行中] PID=$pid"
+            echo "Status: [Running] PID=$pid"
         else
-            echo "状态: [未启动]"
+            echo "Status: [Not running]"
         fi
 
-        echo "--- 网络连接 ---"
+        echo "--- Network Connections ---"
         if is_running; then
             pid="$(cat "$PID_FILE")"
             if command -v lsof >/dev/null 2>&1; then
-                lsof -nP -a -p "$pid" -iTCP -sTCP:LISTEN || echo "无监听端口"
+                lsof -nP -a -p "$pid" -iTCP -sTCP:LISTEN || echo "No listening ports"
             elif command -v netstat >/dev/null 2>&1; then
-                netstat -an | grep LISTEN || echo "无监听端口"
+                netstat -an | grep LISTEN || echo "No listening ports"
             else
-                echo "未找到 lsof/netstat，无法显示监听端口"
+                echo "lsof/netstat not found, cannot show listening ports"
             fi
         else
-            echo "无监听端口"
+            echo "No listening ports"
         fi
 
-        echo "--- 最新日志 ---"
+        echo "--- Recent Logs ---"
         if [ -f "$LOG" ]; then
             tail -n 5 "$LOG"
         else
-            echo "日志文件不存在: $LOG"
+            echo "Log file does not exist: $LOG"
         fi
         ;;
     *)
-        echo "用法: $0 {start|stop|status}"
+        echo "Usage: $0 {start|stop|status}"
         exit 1
         ;;
 esac
