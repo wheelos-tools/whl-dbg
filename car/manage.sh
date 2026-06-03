@@ -138,6 +138,8 @@ case "$ACTION" in
         sleep 1
         if is_running; then
             echo "$PROC started in background (PID: $(cat "$PID_FILE")), view logs at $LOG"
+            echo
+            "$0" status
         else
             echo "Start failed, please check logs: $LOG"
             rm -f "$PID_FILE"
@@ -178,14 +180,14 @@ case "$ACTION" in
         if is_running; then
             pid="$(cat "$PID_FILE")"
             if command -v lsof >/dev/null 2>&1; then
-                lsof -nP -a -p "$pid" -iTCP -sTCP:LISTEN || echo "No listening ports"
+                lsof -nP -a -p "$pid" -iTCP || echo "No active TCP connections"
             elif command -v netstat >/dev/null 2>&1; then
-                netstat -an | grep LISTEN || echo "No listening ports"
+                netstat -anp 2>/dev/null | grep "$pid/frpc" || echo "No active TCP connections"
             else
-                echo "lsof/netstat not found, cannot show listening ports"
+                echo "lsof/netstat not found, cannot show active connections"
             fi
         else
-            echo "No listening ports"
+            echo "No active TCP connections"
         fi
 
         echo "--- Recent Logs ---"

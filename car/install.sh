@@ -4,6 +4,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+LOCAL_ARCHIVE="${1:-}"
+if [ -n "$LOCAL_ARCHIVE" ]; then
+    if [[ ! "$LOCAL_ARCHIVE" = /* ]]; then
+        LOCAL_ARCHIVE="$PWD/$LOCAL_ARCHIVE"
+    fi
+    if [ ! -f "$LOCAL_ARCHIVE" ]; then
+        echo "Error: Local archive not found: $LOCAL_ARCHIVE"
+        exit 1
+    fi
+fi
+
 INSTALL_DIR="${INSTALL_DIR:-/opt/frp/car}"
 FRP_VER="${FRP_VER:-0.54.0}"
 
@@ -54,33 +65,38 @@ else
     tmpdir="$(mktemp -d)"
     trap 'rm -rf "$tmpdir"' EXIT
 
-    download_ok=0
-    for url in "$PRIMARY_URL" "$FALLBACK_URL"; do
-        [ -n "$url" ] || continue
-        echo "Attempting download: $url"
-        if command -v curl >/dev/null 2>&1; then
-            if curl -fL "$url" -o "$tmpdir/frp.tar.gz"; then
-                download_ok=1
-                break
+    if [ -n "$LOCAL_ARCHIVE" ]; then
+        echo "Using local archive: $LOCAL_ARCHIVE"
+        cp "$LOCAL_ARCHIVE" "$tmpdir/frp.tar.gz"
+    else
+        download_ok=0
+        for url in "$PRIMARY_URL" "$FALLBACK_URL"; do
+            [ -n "$url" ] || continue
+            echo "Attempting download: $url"
+            if command -v curl >/dev/null 2>&1; then
+                if curl -fL "$url" -o "$tmpdir/frp.tar.gz"; then
+                    download_ok=1
+                    break
+                fi
+            elif command -v wget >/dev/null 2>&1; then
+                if wget "$url" -O "$tmpdir/frp.tar.gz"; then
+                    download_ok=1
+                    break
+                fi
+            else
+                echo "Error: no download tool found; please install curl or wget"
+                exit 1
             fi
-        elif command -v wget >/dev/null 2>&1; then
-            if wget "$url" -O "$tmpdir/frp.tar.gz"; then
-                download_ok=1
-                break
-            fi
-        else
-            echo "Error: no download tool found; please install curl or wget"
+            rm -f "$tmpdir/frp.tar.gz"
+        done
+
+        if [ "$download_ok" -ne 1 ]; then
+            echo "Error: both download sources failed."
+            echo "Tried:"
+            echo "  1) $PRIMARY_URL"
+            echo "  2) $FALLBACK_URL"
             exit 1
         fi
-        rm -f "$tmpdir/frp.tar.gz"
-    done
-
-    if [ "$download_ok" -ne 1 ]; then
-        echo "Error: both download sources failed."
-        echo "Tried:"
-        echo "  1) $PRIMARY_URL"
-        echo "  2) $FALLBACK_URL"
-        exit 1
     fi
 
     if ! tar -zxf "$tmpdir/frp.tar.gz" -C "$tmpdir"; then
@@ -88,7 +104,13 @@ else
         exit 1
     fi
 
-    if ! cp "$tmpdir/frp_${FRP_VER}_${suffix}/frpc" .; then
+    extracted_frpc=$(find "$tmpdir" -type f -name "frpc" | head -n 1)
+    if [ -z "$extracted_frpc" ]; then
+        echo "Error: failed to find frpc in the archive"
+        exit 1
+    fi
+
+    if ! cp "$extracted_frpc" .; then
         echo "Error: failed to copy frpc from archive"
         exit 1
     fi
@@ -136,7 +158,7 @@ validate_port "$REMOTE_PORT_APP" "remote app"
 
 if [ "$REMOTE_PORT_SSH" -eq "$REMOTE_PORT_APP" ]; then
     echo "Error: remote SSH port and remote APP port conflict: $REMOTE_PORT_SSH"
-    echo "Please adjust SSH_REMOTE_BASE or SSH_REMOTE_BASE."
+    echo "Please check your SSH_REMOTE_BASE logic."
     exit 1
 fi
 
