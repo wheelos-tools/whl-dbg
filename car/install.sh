@@ -4,17 +4,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-LOCAL_ARCHIVE="${1:-}"
-if [ -n "$LOCAL_ARCHIVE" ]; then
-    if [[ ! "$LOCAL_ARCHIVE" = /* ]]; then
-        LOCAL_ARCHIVE="$PWD/$LOCAL_ARCHIVE"
-    fi
-    if [ ! -f "$LOCAL_ARCHIVE" ]; then
-        echo "Error: Local archive not found: $LOCAL_ARCHIVE"
-        exit 1
-    fi
-fi
-
 INSTALL_DIR="${INSTALL_DIR:-/opt/frp/car}"
 FRP_VER="${FRP_VER:-0.54.0}"
 
@@ -22,9 +11,6 @@ SSH_REMOTE_BASE="${SSH_REMOTE_BASE:-60000}"
 
 LOCAL_SSH_IP="${LOCAL_SSH_IP:-127.0.0.1}"
 LOCAL_SSH_PORT="${LOCAL_SSH_PORT:-22}"
-
-LOCAL_APP_IP="${LOCAL_APP_IP:-127.0.0.1}"
-LOCAL_APP_PORT="${LOCAL_APP_PORT:-8888}"
 
 if [ "$(uname -s)" != "Linux" ]; then
     echo "Error: this installer downloads the Linux build of frp; please run on a Linux host."
@@ -65,38 +51,33 @@ else
     tmpdir="$(mktemp -d)"
     trap 'rm -rf "$tmpdir"' EXIT
 
-    if [ -n "$LOCAL_ARCHIVE" ]; then
-        echo "Using local archive: $LOCAL_ARCHIVE"
-        cp "$LOCAL_ARCHIVE" "$tmpdir/frp.tar.gz"
-    else
-        download_ok=0
-        for url in "$PRIMARY_URL" "$FALLBACK_URL"; do
-            [ -n "$url" ] || continue
-            echo "Attempting download: $url"
-            if command -v curl >/dev/null 2>&1; then
-                if curl -fL "$url" -o "$tmpdir/frp.tar.gz"; then
-                    download_ok=1
-                    break
-                fi
-            elif command -v wget >/dev/null 2>&1; then
-                if wget "$url" -O "$tmpdir/frp.tar.gz"; then
-                    download_ok=1
-                    break
-                fi
-            else
-                echo "Error: no download tool found; please install curl or wget"
-                exit 1
+    download_ok=0
+    for url in "$PRIMARY_URL" "$FALLBACK_URL"; do
+        [ -n "$url" ] || continue
+        echo "Attempting download: $url"
+        if command -v curl >/dev/null 2>&1; then
+            if curl -fL "$url" -o "$tmpdir/frp.tar.gz"; then
+                download_ok=1
+                break
             fi
-            rm -f "$tmpdir/frp.tar.gz"
-        done
-
-        if [ "$download_ok" -ne 1 ]; then
-            echo "Error: both download sources failed."
-            echo "Tried:"
-            echo "  1) $PRIMARY_URL"
-            echo "  2) $FALLBACK_URL"
+        elif command -v wget >/dev/null 2>&1; then
+            if wget "$url" -O "$tmpdir/frp.tar.gz"; then
+                download_ok=1
+                break
+            fi
+        else
+            echo "Error: no download tool found; please install curl or wget"
             exit 1
         fi
+        rm -f "$tmpdir/frp.tar.gz"
+    done
+
+    if [ "$download_ok" -ne 1 ]; then
+        echo "Error: both download sources failed."
+        echo "Tried:"
+        echo "  1) $PRIMARY_URL"
+        echo "  2) $FALLBACK_URL"
+        exit 1
     fi
 
     if ! tar -zxf "$tmpdir/frp.tar.gz" -C "$tmpdir"; then
@@ -104,13 +85,7 @@ else
         exit 1
     fi
 
-    extracted_frpc=$(find "$tmpdir" -type f -name "frpc" | head -n 1)
-    if [ -z "$extracted_frpc" ]; then
-        echo "Error: failed to find frpc in the archive"
-        exit 1
-    fi
-
-    if ! cp "$extracted_frpc" .; then
+    if ! cp "$tmpdir/frp_${FRP_VER}_${suffix}/frpc" .; then
         echo "Error: failed to copy frpc from archive"
         exit 1
     fi
@@ -140,7 +115,6 @@ if [ -z "$AUTH_TOKEN" ]; then
 fi
 
 REMOTE_PORT_SSH=$((SSH_REMOTE_BASE + C_ID))
-REMOTE_PORT_APP=$((SSH_REMOTE_BASE + C_ID + 1))
 
 validate_port() {
     local port="$1"
@@ -152,15 +126,7 @@ validate_port() {
 }
 
 validate_port "$LOCAL_SSH_PORT" "local ssh"
-validate_port "$LOCAL_APP_PORT" "local app"
 validate_port "$REMOTE_PORT_SSH" "remote ssh"
-validate_port "$REMOTE_PORT_APP" "remote app"
-
-if [ "$REMOTE_PORT_SSH" -eq "$REMOTE_PORT_APP" ]; then
-    echo "Error: remote SSH port and remote APP port conflict: $REMOTE_PORT_SSH"
-    echo "Please check your SSH_REMOTE_BASE logic."
-    exit 1
-fi
 
 cat <<EOF > frpc.toml
 serverAddr = "$S_IP"
@@ -173,13 +139,6 @@ type = "tcp"
 localIP = "$LOCAL_SSH_IP"
 localPort = $LOCAL_SSH_PORT
 remotePort = $REMOTE_PORT_SSH
-
-[[proxies]]
-name = "car_${C_ID}_app_8888"
-type = "tcp"
-localIP = "$LOCAL_APP_IP"
-localPort = $LOCAL_APP_PORT
-remotePort = $REMOTE_PORT_APP
 EOF
 
 chmod 600 frpc.toml
@@ -189,9 +148,13 @@ echo "Car installer finished."
 echo "Install directory : $INSTALL_DIR"
 echo "Config file       : $INSTALL_DIR/frpc.toml"
 echo "SSH mapping       : ${LOCAL_SSH_IP}:${LOCAL_SSH_PORT} -> ${S_IP}:${REMOTE_PORT_SSH}"
-echo "APP mapping       : ${LOCAL_APP_IP}:${LOCAL_APP_PORT} -> ${S_IP}:${REMOTE_PORT_APP}"
+echo "8888 access       : use SSH local forwarding through port ${REMOTE_PORT_SSH}"
 echo
 echo "Start command:"
 echo "  cd $INSTALL_DIR && ./frpc -c frpc.toml"
 echo "Autostart command:"
 echo "  bash $SCRIPT_DIR/manage.sh autostart on"
+echo
+echo "Secure local 8888 access (run on your local computer):"
+echo "  ssh -N -T -p ${REMOTE_PORT_SSH} -L 127.0.0.1:18888:127.0.0.1:8888 user@${S_IP}"
+echo "  Then open: http://127.0.0.1:18888"
